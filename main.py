@@ -289,7 +289,7 @@ async def submit_task_result(
             # 生成唯一的文件名
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file_extension = os.path.splitext(file.filename)[1]
-            unique_filename = f"result_{timestamp}_{file.filename}"
+            unique_filename = f"{timestamp}_{file.filename}"
             file_path = os.path.join(UPLOAD_DIR, unique_filename)
 
             # 保存文件
@@ -297,8 +297,9 @@ async def submit_task_result(
                 content = await file.read()
                 buffer.write(content)
 
-            # 将文件路径添加到结果中
+            # 将文件路径和原始文件名添加到结果中
             result_dict["file_path"] = file_path
+            result_dict["original_filename"] = file.filename  # 保存原始文件名
             logger.debug(f"结果文件已上传: {file_path}")
 
         task = tasks[task_id]
@@ -348,8 +349,9 @@ async def get_task_result_file(task_id: str):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="结果文件不存在")
 
-    # 从文件路径中提取原始文件名（移除时间戳前缀）
-    original_filename = "_".join(os.path.basename(file_path).split("_")[2:])
+    # 使用保存的原始文件名
+    original_filename = task.result.get(
+        "original_filename", os.path.basename(file_path))
 
     return FileResponse(
         path=file_path,
