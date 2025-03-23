@@ -32,7 +32,7 @@
             border-radius: 5px;
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-start;
         }
 
         .task-item.completed {
@@ -120,6 +120,82 @@
             margin: 0 0 10px 0;
         }
 
+        .log-section {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .log-section h4 {
+            margin: 0 0 10px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .log-form {
+            margin-bottom: 10px;
+        }
+
+        .log-input {
+            width: 100%;
+            padding: 8px;
+            margin: 8px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .log-list {
+            max-height: 200px;
+            overflow-y: auto;
+            background-color: #f1f1f1;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-timestamp {
+            color: #666;
+            font-size: 0.8em;
+        }
+
+        .log-content {
+            margin: 5px 0;
+        }
+
+        .log-level {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.8em;
+            margin-right: 5px;
+        }
+
+        .log-level.info {
+            background-color: #2196f3;
+            color: white;
+        }
+
+        .log-level.warning {
+            background-color: #ff9800;
+            color: white;
+        }
+
+        .log-level.error {
+            background-color: #f44336;
+            color: white;
+        }
+
         pre {
             background-color: #f1f1f1;
             padding: 10px;
@@ -201,6 +277,30 @@
             }
         }
 
+        function addTaskLog(taskId) {
+            const logContent = document.getElementById(`log-input-${taskId}`).value;
+            const logLevel = document.getElementById(`log-level-${taskId}`).value;
+
+            if (!logContent) {
+                alert('请输入日志内容');
+                return;
+            }
+
+            const log = {
+                timestamp: new Date().toISOString(),
+                content: logContent,
+                level: logLevel
+            };
+
+            ws.send(JSON.stringify({
+                type: 'update_task',
+                task_id: taskId,
+                log: log
+            }));
+
+            document.getElementById(`log-input-${taskId}`).value = '';
+        }
+
         function getStatusDisplay(status) {
             const statusMap = {
                 'pending': '待处理',
@@ -247,6 +347,32 @@
                         </div>
                     `;
                 }
+
+                taskContent.innerHTML += `
+                    <div class="log-section">
+                        <h4>
+                            任务日志
+                            <div class="log-form">
+                                <input type="text" id="log-input-${task.id}" class="log-input" placeholder="输入日志内容">
+                                <select id="log-level-${task.id}" class="log-input">
+                                    <option value="info">信息</option>
+                                    <option value="warning">警告</option>
+                                    <option value="error">错误</option>
+                                </select>
+                                <button onclick="addTaskLog('${task.id}')">添加日志</button>
+                            </div>
+                        </h4>
+                        <div class="log-list">
+                            ${task.logs.map(log => `
+                                <div class="log-entry">
+                                    <span class="log-timestamp">${new Date(log.timestamp).toLocaleString()}</span>
+                                    <span class="log-level ${log.level}">${log.level}</span>
+                                    <div class="log-content">${log.content}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
 
                 const taskActions = document.createElement('div');
                 taskActions.innerHTML = `

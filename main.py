@@ -5,7 +5,7 @@ from typing import List, Dict
 import json
 from datetime import datetime
 import os
-from schemas import Task, TaskCreate, TaskUpdate, TaskStatus
+from schemas import Task, TaskCreate, TaskUpdate, TaskStatus, TaskLog
 
 app = FastAPI(title="任务管理器API")
 
@@ -53,6 +53,15 @@ async def websocket_endpoint(websocket: WebSocket):
                         task.status = TaskStatus(message["status"])
                     if "result" in message:
                         task.result = message["result"]
+                    if "log" in message:
+                        log_data = message["log"]
+                        log = TaskLog(
+                            timestamp=datetime.fromisoformat(
+                                log_data["timestamp"]),
+                            content=log_data["content"],
+                            level=log_data.get("level", "info")
+                        )
+                        task.logs.append(log)
                     task.updated_at = datetime.now()
                     await broadcast_task_update("task_updated", task)
 
@@ -140,6 +149,27 @@ async def get_task_result(task_id: str):
         raise HTTPException(status_code=404, detail="任务结果不存在")
 
     return task.result
+
+
+@app.post("/tasks/{task_id}/log")
+async def add_task_log(task_id: str, log: TaskLog):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    task.logs.append(log)
+    task.updated_at = datetime.now()
+
+    return {"message": "日志已添加", "task": task.dict()}
+
+
+@app.get("/tasks/{task_id}/logs")
+async def get_task_logs(task_id: str):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    return task.logs
 
 
 @app.delete("/tasks/{task_id}")
