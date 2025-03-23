@@ -1,31 +1,19 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from typing import List, Dict
 import json
 from datetime import datetime
-from pydantic import BaseModel
 import os
+from schemas import Task, TaskCreate, TaskUpdate, TaskStatus
 
-app = FastAPI()
+app = FastAPI(title="任务管理器API")
 
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # 存储所有活动的WebSocket连接
 active_connections: List[WebSocket] = []
-
-# 任务模型
-
-
-class Task(BaseModel):
-    id: str
-    title: str
-    description: str
-    status: str
-    created_at: datetime
-    updated_at: datetime
-
 
 # 内存中存储任务
 tasks: Dict[str, Task] = {}
@@ -46,11 +34,12 @@ async def websocket_endpoint(websocket: WebSocket):
             message = json.loads(data)
 
             if message["type"] == "create_task":
+                task_data = message["task"]
                 task = Task(
-                    id=message["task"]["id"],
-                    title=message["task"]["title"],
-                    description=message["task"]["description"],
-                    status="pending",
+                    id=task_data["id"],
+                    title=task_data["title"],
+                    description=task_data["description"],
+                    status=TaskStatus.PENDING,
                     created_at=datetime.now(),
                     updated_at=datetime.now()
                 )
@@ -61,7 +50,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 task_id = message["task_id"]
                 if task_id in tasks:
                     task = tasks[task_id]
-                    task.status = message["status"]
+                    task.status = TaskStatus(message["status"])
                     task.updated_at = datetime.now()
                     await broadcast_task_update("task_updated", task)
 
@@ -83,10 +72,58 @@ async def broadcast_task_update(event_type: str, task: Task):
     for connection in active_connections:
         await connection.send_text(json.dumps(message))
 
+# REST API endpoints
 
-@app.get("/tasks")
+
+@app.get("/tasks", response_model=List[Task])
 async def get_tasks():
     return list(tasks.values())
+
+
+@app.post("/tasks", response_model=Task)
+async def create_task(task: TaskCreate):
+    task_id = str(len(tasks) + 1)
+    new_task = Task(
+        id=task_id,
+        title=task.title,
+        description=task.description,
+        status=task.status,
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+    tasks[task_id] = new_task
+    return new_task
+
+
+@app.get("/tasks/{task_id}", response_model=Task)
+async def get_task(task_id: str):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return tasks[task_id]
+
+
+@app.put("/tasks/{task_id}", response_model=Task)
+async def update_task(task_id: str, task_update: TaskUpdate):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    update_data = task_update.dict(exclude_unset=True)
+
+    for field, value in update_data.items():
+        setattr(task, field, value)
+
+    task.updated_at = datetime.now()
+    return task
+
+
+@app.delete("/tasks/{task_id}")
+async def delete_task(task_id: str):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks.pop(task_id)
+    return {"message": "任务已删除", "task": task.dict()}
 
 if __name__ == "__main__":
     import uvicorn
