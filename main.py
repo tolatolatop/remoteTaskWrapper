@@ -109,8 +109,19 @@ class ConnectionManager:
                 "type": message["type"],
                 "task": self._serialize_datetime(message["task"])
             }
-            for receiver in self.task_connections[task_id]["receiver"]:
-                await receiver.send_text(json.dumps(serialized_message))
+            # 获取所有接收者
+            receivers = self.task_connections[task_id]["receiver"]
+            logger.debug(f"准备向 {len(receivers)} 个接收者广播消息")
+
+            # 并发发送消息给所有接收者
+            for receiver in receivers:
+                try:
+                    await receiver.send_text(json.dumps(serialized_message))
+                    logger.debug(f"消息已发送到接收者: {receiver}")
+                except Exception as e:
+                    logger.error(f"发送消息到接收者时出错: {str(e)}")
+                    # 如果发送失败，断开连接
+                    self.disconnect(receiver)
 
 
 manager = ConnectionManager()
