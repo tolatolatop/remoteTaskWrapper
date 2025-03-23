@@ -348,9 +348,12 @@ async def get_task_result_file(task_id: str):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="结果文件不存在")
 
+    # 从文件路径中提取原始文件名（移除时间戳前缀）
+    original_filename = "_".join(os.path.basename(file_path).split("_")[2:])
+
     return FileResponse(
         path=file_path,
-        filename=os.path.basename(file_path),
+        filename=original_filename,
         media_type='application/octet-stream'
     )
 
