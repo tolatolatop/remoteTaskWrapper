@@ -116,7 +116,7 @@ class ConnectionManager:
             # 并发发送消息给所有接收者
             for receiver in receivers:
                 try:
-                    await receiver.send_text(json.dumps(serialized_message))
+                    await receiver.send_json(serialized_message)
                     logger.debug(f"消息已发送到接收者: {receiver}")
                 except Exception as e:
                     logger.error(f"发送消息到接收者时出错: {str(e)}")
@@ -174,6 +174,16 @@ async def websocket_endpoint(websocket: WebSocket):
         await manager.connect(websocket, task_id, role)
         logger.info(f"WebSocket已成功连接到任务 {task_id} 作为 {role}")
 
+        # 如果是receiver，立即发送当前任务的所有日志
+        if role == "receiver":
+            task = tasks[task_id]
+            logger.debug(f"向receiver发送当前任务的所有日志，共 {len(task.logs)} 条")
+            await websocket.send_json({
+                "type": "task_updated",
+                "task": manager._serialize_datetime(task.model_dump())
+            })
+            logger.debug("当前任务日志发送完成")
+
         # 根据角色处理消息
         while True:
             logger.debug(f"等待来自 {role} 的新消息...")
@@ -203,7 +213,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.debug(f"准备广播更新到任务 {task_id} 的所有接收者")
                         await manager.broadcast_to_task(task_id, {
                             "type": "task_updated",
-                            "task": task.model_dump()
+                            "task": manager._serialize_datetime(task.model_dump())
                         })
                         logger.debug("广播完成")
 
