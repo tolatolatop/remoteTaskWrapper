@@ -1,7 +1,7 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
 import json
 from datetime import datetime
 import os
@@ -11,6 +11,10 @@ app = FastAPI(title="任务管理器API")
 
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# 创建上传文件存储目录
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # 存储所有活动的WebSocket连接
 
@@ -129,21 +133,50 @@ async def get_tasks():
 
 
 @app.post("/tasks", response_model=Task)
-async def create_task(task: TaskCreate):
-    task_id = str(len(tasks) + 1)
-    new_task = Task(
-        id=task_id,
-        params=task.params,
-        status=task.status,
-        created_at=datetime.now(),
-        updated_at=datetime.now()
-    )
-    tasks[task_id] = new_task
-    await manager.broadcast_to_task(task_id, {
-        "type": "task_created",
-        "task": new_task.dict()
-    })
-    return new_task
+async def create_task(
+    file: Optional[UploadFile] = File(None),
+    params: str = Form(...)
+):
+    try:
+        # 解析参数
+        params_dict = json.loads(params)
+
+        # 处理文件上传
+        file_path = None
+        if file:
+            # 生成唯一的文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_extension = os.path.splitext(file.filename)[1]
+            unique_filename = f"{timestamp}_{file.filename}"
+            file_path = os.path.join(UPLOAD_DIR, unique_filename)
+
+            # 保存文件
+            with open(file_path, "wb") as buffer:
+                content = await file.read()
+                buffer.write(content)
+
+            # 将文件路径添加到参数中
+            params_dict["file_path"] = file_path
+
+        # 创建任务
+        task_id = str(len(tasks) + 1)
+        new_task = Task(
+            id=task_id,
+            params=params_dict,
+            status=TaskStatus.PENDING,
+            created_at=datetime.now(),
+            updated_at=datetime.now()
+        )
+        tasks[task_id] = new_task
+        await manager.broadcast_to_task(task_id, {
+            "type": "task_created",
+            "task": new_task.dict()
+        })
+        return new_task
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="无效的参数格式")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/tasks/{task_id}", response_model=Task)

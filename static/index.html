@@ -202,6 +202,51 @@
             border-radius: 4px;
             overflow-x: auto;
         }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .file-input {
+            width: 100%;
+            padding: 8px;
+            margin: 8px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .param-item {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .param-key,
+        .param-value {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .remove-param {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+
+        .remove-param:hover {
+            background-color: #da190b;
+        }
     </style>
 </head>
 
@@ -210,7 +255,21 @@
 
     <div class="task-form">
         <h2>创建新任务</h2>
-        <textarea id="taskParams" placeholder="输入任务参数（JSON格式）"></textarea>
+        <div class="form-group">
+            <label>文件参数：</label>
+            <input type="file" id="taskFile" class="file-input">
+        </div>
+        <div class="form-group">
+            <label>其他参数：</label>
+            <div id="paramsList">
+                <div class="param-item">
+                    <input type="text" class="param-key" placeholder="参数名">
+                    <input type="text" class="param-value" placeholder="参数值">
+                    <button class="remove-param" onclick="removeParam(this)">删除</button>
+                </div>
+            </div>
+            <button onclick="addParam()">添加参数</button>
+        </div>
         <button onclick="createTask()">创建任务</button>
     </div>
 
@@ -264,26 +323,48 @@
             };
         }
 
+        function addParam() {
+            const paramsList = document.getElementById('paramsList');
+            const paramItem = document.createElement('div');
+            paramItem.className = 'param-item';
+            paramItem.innerHTML = `
+                <input type="text" class="param-key" placeholder="参数名">
+                <input type="text" class="param-value" placeholder="参数值">
+                <button class="remove-param" onclick="removeParam(this)">删除</button>
+            `;
+            paramsList.appendChild(paramItem);
+        }
+
+        function removeParam(button) {
+            button.parentElement.remove();
+        }
+
         async function createTask() {
-            const paramsText = document.getElementById('taskParams').value;
-            let params;
-            try {
-                params = JSON.parse(paramsText);
-            } catch (e) {
-                alert('请输入有效的JSON格式参数');
-                return;
+            const fileInput = document.getElementById('taskFile');
+            const file = fileInput.files[0];
+
+            // 收集所有参数
+            const params = {};
+            const paramItems = document.querySelectorAll('.param-item');
+            paramItems.forEach(item => {
+                const key = item.querySelector('.param-key').value;
+                const value = item.querySelector('.param-value').value;
+                if (key && value) {
+                    params[key] = value;
+                }
+            });
+
+            // 创建 FormData 对象
+            const formData = new FormData();
+            if (file) {
+                formData.append('file', file);
             }
+            formData.append('params', JSON.stringify(params));
 
             try {
                 const response = await fetch('/tasks', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        params: params,
-                        status: 'pending'
-                    })
+                    body: formData
                 });
 
                 if (!response.ok) {
@@ -293,7 +374,16 @@
                 const newTask = await response.json();
                 // 创建任务后，自动连接为sender
                 connectWebSocket(newTask.id, 'sender');
-                document.getElementById('taskParams').value = '';
+
+                // 清空表单
+                fileInput.value = '';
+                document.getElementById('paramsList').innerHTML = `
+                    <div class="param-item">
+                        <input type="text" class="param-key" placeholder="参数名">
+                        <input type="text" class="param-value" placeholder="参数值">
+                        <button class="remove-param" onclick="removeParam(this)">删除</button>
+                    </div>
+                `;
             } catch (error) {
                 alert('创建任务失败: ' + error.message);
             }
