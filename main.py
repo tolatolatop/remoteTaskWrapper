@@ -1,3 +1,4 @@
+from schemas import Task, TaskCreate, TaskUpdate, TaskStatus, TaskLog
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -5,7 +6,51 @@ from typing import List, Dict, Set, Optional
 import json
 from datetime import datetime
 import os
-from schemas import Task, TaskCreate, TaskUpdate, TaskStatus, TaskLog
+import logging
+from logging.handlers import RotatingFileHandler
+
+# 配置日志
+
+
+def setup_logger():
+    # 创建日志目录
+    log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+
+    # 创建logger对象
+    logger = logging.getLogger("task_manager")
+    logger.setLevel(logging.DEBUG)
+
+    # 创建控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG)
+
+    # 创建文件处理器
+    file_handler = RotatingFileHandler(
+        os.path.join(log_dir, "task_manager.log"),
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setLevel(logging.DEBUG)
+
+    # 创建格式化器
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    console_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+
+    # 添加处理器到logger
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+    return logger
+
+
+# 创建全局logger对象
+logger = setup_logger()
+
 
 app = FastAPI(title="任务管理器API")
 
@@ -140,6 +185,7 @@ async def create_task(
     try:
         # 解析参数
         params_dict = json.loads(params)
+        logger.debug(f"创建新任务，参数: {params_dict}")
 
         # 处理文件上传
         file_path = None
@@ -157,6 +203,7 @@ async def create_task(
 
             # 将文件路径添加到参数中
             params_dict["file_path"] = file_path
+            logger.debug(f"文件已上传: {file_path}")
 
         # 创建任务
         task_id = str(len(tasks) + 1)
@@ -168,14 +215,18 @@ async def create_task(
             updated_at=datetime.now()
         )
         tasks[task_id] = new_task
+        logger.info(f"任务创建成功: {task_id}")
+
         await manager.broadcast_to_task(task_id, {
             "type": "task_created",
             "task": new_task.dict()
         })
         return new_task
     except json.JSONDecodeError:
+        logger.error(f"创建任务失败: 无效的参数格式")
         raise HTTPException(status_code=400, detail="无效的参数格式")
     except Exception as e:
+        logger.error(f"创建任务失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -189,10 +240,12 @@ async def get_task(task_id: str):
 @app.put("/tasks/{task_id}", response_model=Task)
 async def update_task(task_id: str, task_update: TaskUpdate):
     if task_id not in tasks:
+        logger.warning(f"更新任务失败: 任务不存在 {task_id}")
         raise HTTPException(status_code=404, detail="任务不存在")
 
     task = tasks[task_id]
     update_data = task_update.dict(exclude_unset=True)
+    logger.debug(f"更新任务 {task_id}: {update_data}")
 
     # 更新任务字段
     for field, value in update_data.items():
@@ -203,6 +256,8 @@ async def update_task(task_id: str, task_update: TaskUpdate):
             setattr(task, field, value)
 
     task.updated_at = datetime.now()
+    logger.info(f"任务更新成功: {task_id}")
+
     await manager.broadcast_to_task(task_id, {
         "type": "task_updated",
         "task": task.dict()
@@ -217,11 +272,13 @@ async def submit_task_result(
     result_params: str = Form(...)
 ):
     if task_id not in tasks:
+        logger.warning(f"提交任务结果失败: 任务不存在 {task_id}")
         raise HTTPException(status_code=404, detail="任务不存在")
 
     try:
         # 解析结果参数
         result_dict = json.loads(result_params)
+        logger.debug(f"提交任务结果 {task_id}: {result_dict}")
 
         # 处理结果文件上传
         file_path = None
@@ -239,11 +296,13 @@ async def submit_task_result(
 
             # 将文件路径添加到结果中
             result_dict["file_path"] = file_path
+            logger.debug(f"结果文件已上传: {file_path}")
 
         task = tasks[task_id]
         task.result = result_dict
         task.status = TaskStatus.COMPLETED
         task.updated_at = datetime.now()
+        logger.info(f"任务结果提交成功: {task_id}")
 
         await manager.broadcast_to_task(task_id, {
             "type": "task_updated",
@@ -251,8 +310,10 @@ async def submit_task_result(
         })
         return {"message": "任务结果已提交", "task": task.dict()}
     except json.JSONDecodeError:
+        logger.error(f"提交任务结果失败: 无效的结果参数格式")
         raise HTTPException(status_code=400, detail="无效的结果参数格式")
     except Exception as e:
+        logger.error(f"提交任务结果失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -294,11 +355,13 @@ async def get_task_result_file(task_id: str):
 @app.post("/tasks/{task_id}/log")
 async def add_task_log(task_id: str, log: TaskLog):
     if task_id not in tasks:
+        logger.warning(f"添加任务日志失败: 任务不存在 {task_id}")
         raise HTTPException(status_code=404, detail="任务不存在")
 
     task = tasks[task_id]
     task.logs.append(log)
     task.updated_at = datetime.now()
+    logger.info(f"任务日志添加成功: {task_id}, 级别: {log.level}, 内容: {log.content}")
 
     await manager.broadcast_to_task(task_id, {
         "type": "task_updated",
