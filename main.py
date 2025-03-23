@@ -206,20 +206,49 @@ async def update_task(task_id: str, task_update: TaskUpdate):
 
 
 @app.post("/tasks/{task_id}/result")
-async def submit_task_result(task_id: str, result: dict):
+async def submit_task_result(
+    task_id: str,
+    file: Optional[UploadFile] = File(None),
+    result_params: str = Form(...)
+):
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    task = tasks[task_id]
-    task.result = result
-    task.status = TaskStatus.COMPLETED
-    task.updated_at = datetime.now()
+    try:
+        # 解析结果参数
+        result_dict = json.loads(result_params)
 
-    await manager.broadcast_to_task(task_id, {
-        "type": "task_updated",
-        "task": task.dict()
-    })
-    return {"message": "任务结果已提交", "task": task.dict()}
+        # 处理结果文件上传
+        file_path = None
+        if file:
+            # 生成唯一的文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_extension = os.path.splitext(file.filename)[1]
+            unique_filename = f"result_{timestamp}_{file.filename}"
+            file_path = os.path.join(UPLOAD_DIR, unique_filename)
+
+            # 保存文件
+            with open(file_path, "wb") as buffer:
+                content = await file.read()
+                buffer.write(content)
+
+            # 将文件路径添加到结果中
+            result_dict["file_path"] = file_path
+
+        task = tasks[task_id]
+        task.result = result_dict
+        task.status = TaskStatus.COMPLETED
+        task.updated_at = datetime.now()
+
+        await manager.broadcast_to_task(task_id, {
+            "type": "task_updated",
+            "task": task.dict()
+        })
+        return {"message": "任务结果已提交", "task": task.dict()}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="无效的结果参数格式")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/tasks/{task_id}/result")
@@ -232,6 +261,29 @@ async def get_task_result(task_id: str):
         raise HTTPException(status_code=404, detail="任务结果不存在")
 
     return task.result
+
+
+@app.get("/tasks/{task_id}/result/file")
+async def get_task_result_file(task_id: str):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    if task.result is None:
+        raise HTTPException(status_code=404, detail="任务结果不存在")
+
+    file_path = task.result.get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="任务结果没有关联的文件")
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="结果文件不存在")
+
+    return FileResponse(
+        path=file_path,
+        filename=os.path.basename(file_path),
+        media_type='application/octet-stream'
+    )
 
 
 @app.post("/tasks/{task_id}/log")

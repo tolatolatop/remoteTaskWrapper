@@ -503,6 +503,31 @@
                         <div class="result-section">
                             <h4>任务结果：</h4>
                             <pre>${JSON.stringify(task.result, null, 2)}</pre>
+                            ${task.result.file_path ? `
+                                <button onclick="getTaskResultFile('${task.id}')">下载结果文件</button>
+                            ` : ''}
+                        </div>
+                    `;
+                } else if (currentTaskId === task.id && currentRole === 'sender') {
+                    taskContent.innerHTML += `
+                        <div class="result-section">
+                            <h4>提交任务结果：</h4>
+                            <div class="form-group">
+                                <label>结果文件：</label>
+                                <input type="file" id="resultFile-${task.id}" class="file-input">
+                            </div>
+                            <div class="form-group">
+                                <label>结果参数：</label>
+                                <div id="resultParamsList-${task.id}">
+                                    <div class="param-item">
+                                        <input type="text" class="param-key" placeholder="参数名">
+                                        <input type="text" class="param-value" placeholder="参数值">
+                                        <button class="remove-param" onclick="removeResultParam(this)">删除</button>
+                                    </div>
+                                </div>
+                                <button onclick="addResultParam('${task.id}')">添加参数</button>
+                            </div>
+                            <button onclick="submitTaskResult('${task.id}')">提交结果</button>
                         </div>
                     `;
                 }
@@ -598,6 +623,100 @@
                 document.body.removeChild(a);
             } catch (error) {
                 alert('获取任务文件失败: ' + error.message);
+            }
+        }
+
+        function addResultParam(taskId) {
+            const paramsList = document.getElementById(`resultParamsList-${taskId}`);
+            const paramItem = document.createElement('div');
+            paramItem.className = 'param-item';
+            paramItem.innerHTML = `
+                <input type="text" class="param-key" placeholder="参数名">
+                <input type="text" class="param-value" placeholder="参数值">
+                <button class="remove-param" onclick="removeResultParam(this)">删除</button>
+            `;
+            paramsList.appendChild(paramItem);
+        }
+
+        function removeResultParam(button) {
+            button.parentElement.remove();
+        }
+
+        async function submitTaskResult(taskId) {
+            const fileInput = document.getElementById(`resultFile-${taskId}`);
+            const file = fileInput.files[0];
+
+            // 收集所有结果参数
+            const resultParams = {};
+            const paramItems = document.querySelectorAll(`#resultParamsList-${taskId} .param-item`);
+            paramItems.forEach(item => {
+                const key = item.querySelector('.param-key').value;
+                const value = item.querySelector('.param-value').value;
+                if (key && value) {
+                    resultParams[key] = value;
+                }
+            });
+
+            // 创建 FormData 对象
+            const formData = new FormData();
+            if (file) {
+                formData.append('file', file);
+            }
+            formData.append('result_params', JSON.stringify(resultParams));
+
+            try {
+                const response = await fetch(`/tasks/${taskId}/result`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('提交任务结果失败');
+                }
+
+                // 清空表单
+                fileInput.value = '';
+                document.getElementById(`resultParamsList-${taskId}`).innerHTML = `
+                    <div class="param-item">
+                        <input type="text" class="param-key" placeholder="参数名">
+                        <input type="text" class="param-value" placeholder="参数值">
+                        <button class="remove-param" onclick="removeResultParam(this)">删除</button>
+                    </div>
+                `;
+            } catch (error) {
+                alert('提交任务结果失败: ' + error.message);
+            }
+        }
+
+        async function getTaskResultFile(taskId) {
+            try {
+                const response = await fetch(`/tasks/${taskId}/result/file`);
+                if (!response.ok) {
+                    throw new Error('获取任务结果文件失败');
+                }
+
+                // 获取文件名
+                const contentDisposition = response.headers.get('content-disposition');
+                let filename = 'result_file';
+                if (contentDisposition) {
+                    const matches = /filename="(.+)"/.exec(contentDisposition);
+                    if (matches) {
+                        filename = matches[1];
+                    }
+                }
+
+                // 下载文件
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            } catch (error) {
+                alert('获取任务结果文件失败: ' + error.message);
             }
         }
 
