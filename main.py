@@ -194,8 +194,13 @@ async def update_task(task_id: str, task_update: TaskUpdate):
     task = tasks[task_id]
     update_data = task_update.dict(exclude_unset=True)
 
+    # 更新任务字段
     for field, value in update_data.items():
-        setattr(task, field, value)
+        if field == "params":
+            # 对于params字段，直接更新整个字典
+            task.params = value
+        else:
+            setattr(task, field, value)
 
     task.updated_at = datetime.now()
     await manager.broadcast_to_task(task_id, {
