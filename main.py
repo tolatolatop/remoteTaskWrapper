@@ -272,6 +272,39 @@ async def delete_task(task_id: str):
     return {"message": "任务已删除", "task": task.dict()}
 
 
+@app.get("/tasks/{task_id}/params")
+async def get_task_params(task_id: str):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    return {
+        "params": task.params,
+        "file_path": task.params.get("file_path")
+    }
+
+
+@app.get("/tasks/{task_id}/file")
+async def get_task_file(task_id: str):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    file_path = task.params.get("file_path")
+
+    if not file_path:
+        raise HTTPException(status_code=404, detail="任务没有关联的文件")
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    return FileResponse(
+        path=file_path,
+        filename=os.path.basename(file_path),
+        media_type='application/octet-stream'
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

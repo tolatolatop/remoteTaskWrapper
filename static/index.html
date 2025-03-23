@@ -543,6 +543,10 @@
                     <button onclick="updateTaskStatus('${task.id}', '${getNextStatus(task.status)}')">
                         更新状态
                     </button>
+                    <button onclick="getTaskParams('${task.id}')">获取参数</button>
+                    ${task.params.file_path ? `
+                        <button onclick="getTaskFile('${task.id}')">下载文件</button>
+                    ` : ''}
                     <button class="delete" onclick="deleteTask('${task.id}')">删除</button>
                 `;
 
@@ -550,6 +554,51 @@
                 taskElement.appendChild(taskActions);
                 taskList.appendChild(taskElement);
             });
+        }
+
+        async function getTaskParams(taskId) {
+            try {
+                const response = await fetch(`/tasks/${taskId}/params`);
+                if (!response.ok) {
+                    throw new Error('获取任务参数失败');
+                }
+                const data = await response.json();
+                alert('任务参数：\n' + JSON.stringify(data.params, null, 2));
+            } catch (error) {
+                alert('获取任务参数失败: ' + error.message);
+            }
+        }
+
+        async function getTaskFile(taskId) {
+            try {
+                const response = await fetch(`/tasks/${taskId}/file`);
+                if (!response.ok) {
+                    throw new Error('获取任务文件失败');
+                }
+
+                // 获取文件名
+                const contentDisposition = response.headers.get('content-disposition');
+                let filename = 'task_file';
+                if (contentDisposition) {
+                    const matches = /filename="(.+)"/.exec(contentDisposition);
+                    if (matches) {
+                        filename = matches[1];
+                    }
+                }
+
+                // 下载文件
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            } catch (error) {
+                alert('获取任务文件失败: ' + error.message);
+            }
         }
 
         // 页面加载时获取现有任务
