@@ -113,40 +113,53 @@ async def read_root():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     try:
+        logger.debug("收到新的WebSocket连接请求")
         # 先接受WebSocket连接
         await websocket.accept()
+        logger.debug("WebSocket连接已接受")
 
         # 等待客户端发送初始化数据
+        logger.debug("等待客户端发送初始化数据...")
         data = await websocket.receive_text()
+        logger.debug(f"收到初始化数据: {data}")
         init_data = json.loads(data)
 
         if "type" not in init_data or init_data["type"] != "init":
+            logger.warning(f"收到无效的初始化数据类型: {init_data.get('type')}")
             await websocket.close(code=1008, reason="需要初始化数据")
             return
 
         task_id = init_data.get("task_id")
         role = init_data.get("role")
+        logger.debug(f"初始化数据解析: task_id={task_id}, role={role}")
 
         if not task_id or not role or role not in ["sender", "receiver"]:
+            logger.warning(f"无效的task_id或role: task_id={task_id}, role={role}")
             await websocket.close(code=1008, reason="无效的task_id或role")
             return
 
         # 检查任务是否存在
         if task_id not in tasks:
+            logger.warning(f"尝试连接不存在的任务: task_id={task_id}")
             await websocket.close(code=1008, reason="任务不存在")
             return
 
         # 连接WebSocket
+        logger.debug(f"正在将WebSocket连接到任务 {task_id} 作为 {role}")
         await manager.connect(websocket, task_id, role)
+        logger.info(f"WebSocket已成功连接到任务 {task_id} 作为 {role}")
 
         # 根据角色处理消息
         while True:
+            logger.debug(f"等待来自 {role} 的新消息...")
             data = await websocket.receive_text()
+            logger.debug(f"收到消息: {data}")
             message = json.loads(data)
 
             if role == "sender":
                 if message["type"] == "update_task_log":
                     task_id = message["task_id"]
+                    logger.debug(f"处理来自sender的日志更新: task_id={task_id}")
                     if task_id in tasks:
                         task = tasks[task_id]
                         log_data = message["log"]
@@ -158,18 +171,26 @@ async def websocket_endpoint(websocket: WebSocket):
                         )
                         task.logs.append(log)
                         task.updated_at = datetime.now()
+                        logger.debug(
+                            f"已添加新日志: content={log.content}, level={log.level}")
+
                         # 广播给该任务的所有接收者
+                        logger.debug(f"准备广播更新到任务 {task_id} 的所有接收者")
                         await manager.broadcast_to_task(task_id, {
                             "type": "task_updated",
                             "task": task.model_dump()
                         })
+                        logger.debug("广播完成")
+                    else:
+                        logger.warning(f"尝试更新不存在的任务日志: task_id={task_id}")
             else:  # receiver
-                # 接收者不需要处理消息
-                pass
+                logger.debug(f"收到来自receiver的消息，无需处理: {message}")
 
     except WebSocketDisconnect:
+        logger.info(f"WebSocket连接断开: {websocket}")
         manager.disconnect(websocket)
     except Exception as e:
+        logger.error(f"WebSocket处理过程中发生错误: {str(e)}", exc_info=True)
         manager.disconnect(websocket)
         raise e
 
