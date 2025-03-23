@@ -37,8 +37,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 task_data = message["task"]
                 task = Task(
                     id=task_data["id"],
-                    title=task_data["title"],
-                    description=task_data["description"],
+                    params=task_data["params"],
                     status=TaskStatus.PENDING,
                     created_at=datetime.now(),
                     updated_at=datetime.now()
@@ -50,7 +49,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 task_id = message["task_id"]
                 if task_id in tasks:
                     task = tasks[task_id]
-                    task.status = TaskStatus(message["status"])
+                    if "status" in message:
+                        task.status = TaskStatus(message["status"])
+                    if "result" in message:
+                        task.result = message["result"]
                     task.updated_at = datetime.now()
                     await broadcast_task_update("task_updated", task)
 
@@ -72,9 +74,8 @@ async def broadcast_task_update(event_type: str, task: Task):
     for connection in active_connections:
         await connection.send_text(json.dumps(message))
 
+
 # REST API endpoints
-
-
 @app.get("/tasks", response_model=List[Task])
 async def get_tasks():
     return list(tasks.values())
@@ -85,8 +86,7 @@ async def create_task(task: TaskCreate):
     task_id = str(len(tasks) + 1)
     new_task = Task(
         id=task_id,
-        title=task.title,
-        description=task.description,
+        params=task.params,
         status=task.status,
         created_at=datetime.now(),
         updated_at=datetime.now()
@@ -117,6 +117,31 @@ async def update_task(task_id: str, task_update: TaskUpdate):
     return task
 
 
+@app.post("/tasks/{task_id}/result")
+async def submit_task_result(task_id: str, result: dict):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    task.result = result
+    task.status = TaskStatus.COMPLETED
+    task.updated_at = datetime.now()
+
+    return {"message": "任务结果已提交", "task": task.dict()}
+
+
+@app.get("/tasks/{task_id}/result")
+async def get_task_result(task_id: str):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    if task.result is None:
+        raise HTTPException(status_code=404, detail="任务结果不存在")
+
+    return task.result
+
+
 @app.delete("/tasks/{task_id}")
 async def delete_task(task_id: str):
     if task_id not in tasks:
@@ -124,6 +149,7 @@ async def delete_task(task_id: str):
 
     task = tasks.pop(task_id)
     return {"message": "任务已删除", "task": task.dict()}
+
 
 if __name__ == "__main__":
     import uvicorn

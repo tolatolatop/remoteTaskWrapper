@@ -47,7 +47,7 @@
             background-color: #fff3e0;
         }
 
-        .task-item.cancelled {
+        .task-item.failed {
             background-color: #ffebee;
         }
 
@@ -73,13 +73,13 @@
             background-color: #da190b;
         }
 
-        input,
         textarea {
             width: 100%;
             padding: 8px;
             margin: 8px 0;
             border: 1px solid #ddd;
             border-radius: 4px;
+            height: 100px;
         }
 
         .status-badge {
@@ -104,9 +104,27 @@
             color: white;
         }
 
-        .status-cancelled {
+        .status-failed {
             background-color: #f44336;
             color: white;
+        }
+
+        .result-section {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .result-section h4 {
+            margin: 0 0 10px 0;
+        }
+
+        pre {
+            background-color: #f1f1f1;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
         }
     </style>
 </head>
@@ -116,8 +134,7 @@
 
     <div class="task-form">
         <h2>创建新任务</h2>
-        <input type="text" id="taskTitle" placeholder="任务标题">
-        <textarea id="taskDescription" placeholder="任务描述"></textarea>
+        <textarea id="taskParams" placeholder="输入任务参数（JSON格式）"></textarea>
         <button onclick="createTask()">创建任务</button>
     </div>
 
@@ -145,18 +162,18 @@
         };
 
         function createTask() {
-            const title = document.getElementById('taskTitle').value;
-            const description = document.getElementById('taskDescription').value;
-
-            if (!title || !description) {
-                alert('请填写任务标题和描述');
+            const paramsText = document.getElementById('taskParams').value;
+            let params;
+            try {
+                params = JSON.parse(paramsText);
+            } catch (e) {
+                alert('请输入有效的JSON格式参数');
                 return;
             }
 
             const task = {
                 id: Date.now().toString(),
-                title: title,
-                description: description
+                params: params
             };
 
             ws.send(JSON.stringify({
@@ -164,8 +181,7 @@
                 task: task
             }));
 
-            document.getElementById('taskTitle').value = '';
-            document.getElementById('taskDescription').value = '';
+            document.getElementById('taskParams').value = '';
         }
 
         function updateTaskStatus(taskId, newStatus) {
@@ -190,7 +206,7 @@
                 'pending': '待处理',
                 'in_progress': '进行中',
                 'completed': '已完成',
-                'cancelled': '已取消'
+                'failed': '失败'
             };
             return statusMap[status] || status;
         }
@@ -200,7 +216,7 @@
                 'pending': 'in_progress',
                 'in_progress': 'completed',
                 'completed': 'pending',
-                'cancelled': 'pending'
+                'failed': 'pending'
             };
             return statusFlow[currentStatus] || 'pending';
         }
@@ -215,12 +231,22 @@
 
                 const taskContent = document.createElement('div');
                 taskContent.innerHTML = `
-                    <h3>${task.title}</h3>
-                    <p>${task.description}</p>
+                    <h3>任务 #${task.id}</h3>
+                    <p><strong>参数：</strong></p>
+                    <pre>${JSON.stringify(task.params, null, 2)}</pre>
                     <span class="status-badge status-${task.status}">${getStatusDisplay(task.status)}</span>
                     <p>创建时间: ${new Date(task.created_at).toLocaleString()}</p>
                     <p>更新时间: ${new Date(task.updated_at).toLocaleString()}</p>
                 `;
+
+                if (task.result) {
+                    taskContent.innerHTML += `
+                        <div class="result-section">
+                            <h4>任务结果：</h4>
+                            <pre>${JSON.stringify(task.result, null, 2)}</pre>
+                        </div>
+                    `;
+                }
 
                 const taskActions = document.createElement('div');
                 taskActions.innerHTML = `
