@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from typing import List, Dict
+from typing import List, Dict, Set
 import json
 from datetime import datetime
 import os
@@ -13,7 +13,44 @@ app = FastAPI(title="任务管理器API")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # 存储所有活动的WebSocket连接
-active_connections: List[WebSocket] = []
+
+
+class ConnectionManager:
+    def __init__(self):
+        # 按task_id分组的连接
+        self.task_connections: Dict[str, Dict[str, Set[WebSocket]]] = {}
+        # 存储每个连接的task_id和角色
+        self.connection_info: Dict[WebSocket, Dict[str, str]] = {}
+
+    async def connect(self, websocket: WebSocket, task_id: str, role: str):
+        await websocket.accept()
+        if task_id not in self.task_connections:
+            self.task_connections[task_id] = {
+                "sender": set(), "receiver": set()}
+
+        self.task_connections[task_id][role].add(websocket)
+        self.connection_info[websocket] = {"task_id": task_id, "role": role}
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.connection_info:
+            info = self.connection_info[websocket]
+            task_id = info["task_id"]
+            role = info["role"]
+
+            if task_id in self.task_connections:
+                self.task_connections[task_id][role].remove(websocket)
+                if not self.task_connections[task_id]["sender"] and not self.task_connections[task_id]["receiver"]:
+                    del self.task_connections[task_id]
+
+            del self.connection_info[websocket]
+
+    async def broadcast_to_task(self, task_id: str, message: dict):
+        if task_id in self.task_connections:
+            for receiver in self.task_connections[task_id]["receiver"]:
+                await receiver.send_text(json.dumps(message))
+
+
+manager = ConnectionManager()
 
 # 内存中存储任务
 tasks: Dict[str, Task] = {}
@@ -26,39 +63,63 @@ async def read_root():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    active_connections.append(websocket)
     try:
+        # 等待客户端发送初始化数据
+        data = await websocket.receive_text()
+        init_data = json.loads(data)
+
+        if "type" not in init_data or init_data["type"] != "init":
+            await websocket.close(code=1008, reason="需要初始化数据")
+            return
+
+        task_id = init_data.get("task_id")
+        role = init_data.get("role")
+
+        if not task_id or not role or role not in ["sender", "receiver"]:
+            await websocket.close(code=1008, reason="无效的task_id或role")
+            return
+
+        # 检查任务是否存在
+        if task_id not in tasks:
+            await websocket.close(code=1008, reason="任务不存在")
+            return
+
+        # 连接WebSocket
+        await manager.connect(websocket, task_id, role)
+
+        # 根据角色处理消息
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
 
-            if message["type"] == "update_task_log":
-                task_id = message["task_id"]
-                if task_id in tasks:
-                    task = tasks[task_id]
-                    log_data = message["log"]
-                    log = TaskLog(
-                        timestamp=datetime.fromisoformat(
-                            log_data["timestamp"]),
-                        content=log_data["content"],
-                        level=log_data.get("level", "info")
-                    )
-                    task.logs.append(log)
-                    task.updated_at = datetime.now()
-                    await broadcast_task_update("task_updated", task)
+            if role == "sender":
+                if message["type"] == "update_task_log":
+                    task_id = message["task_id"]
+                    if task_id in tasks:
+                        task = tasks[task_id]
+                        log_data = message["log"]
+                        log = TaskLog(
+                            timestamp=datetime.fromisoformat(
+                                log_data["timestamp"]),
+                            content=log_data["content"],
+                            level=log_data.get("level", "info")
+                        )
+                        task.logs.append(log)
+                        task.updated_at = datetime.now()
+                        # 广播给该任务的所有接收者
+                        await manager.broadcast_to_task(task_id, {
+                            "type": "task_updated",
+                            "task": task.dict()
+                        })
+            else:  # receiver
+                # 接收者不需要处理消息
+                pass
 
     except WebSocketDisconnect:
-        active_connections.remove(websocket)
-
-
-async def broadcast_task_update(event_type: str, task: Task):
-    message = {
-        "type": event_type,
-        "task": task.dict()
-    }
-    for connection in active_connections:
-        await connection.send_text(json.dumps(message))
+        manager.disconnect(websocket)
+    except Exception as e:
+        manager.disconnect(websocket)
+        raise e
 
 
 # REST API endpoints
@@ -78,7 +139,10 @@ async def create_task(task: TaskCreate):
         updated_at=datetime.now()
     )
     tasks[task_id] = new_task
-    await broadcast_task_update("task_created", new_task)
+    await manager.broadcast_to_task(task_id, {
+        "type": "task_created",
+        "task": new_task.dict()
+    })
     return new_task
 
 
@@ -101,7 +165,10 @@ async def update_task(task_id: str, task_update: TaskUpdate):
         setattr(task, field, value)
 
     task.updated_at = datetime.now()
-    await broadcast_task_update("task_updated", task)
+    await manager.broadcast_to_task(task_id, {
+        "type": "task_updated",
+        "task": task.dict()
+    })
     return task
 
 
@@ -115,7 +182,10 @@ async def submit_task_result(task_id: str, result: dict):
     task.status = TaskStatus.COMPLETED
     task.updated_at = datetime.now()
 
-    await broadcast_task_update("task_updated", task)
+    await manager.broadcast_to_task(task_id, {
+        "type": "task_updated",
+        "task": task.dict()
+    })
     return {"message": "任务结果已提交", "task": task.dict()}
 
 
@@ -140,7 +210,10 @@ async def add_task_log(task_id: str, log: TaskLog):
     task.logs.append(log)
     task.updated_at = datetime.now()
 
-    await broadcast_task_update("task_updated", task)
+    await manager.broadcast_to_task(task_id, {
+        "type": "task_updated",
+        "task": task.dict()
+    })
     return {"message": "日志已添加", "task": task.dict()}
 
 
@@ -159,7 +232,10 @@ async def delete_task(task_id: str):
         raise HTTPException(status_code=404, detail="任务不存在")
 
     task = tasks.pop(task_id)
-    await broadcast_task_update("task_deleted", task)
+    await manager.broadcast_to_task(task_id, {
+        "type": "task_deleted",
+        "task": task.dict()
+    })
     return {"message": "任务已删除", "task": task.dict()}
 
 

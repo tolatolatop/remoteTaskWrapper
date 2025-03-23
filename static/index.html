@@ -219,23 +219,50 @@
     </div>
 
     <script>
-        let ws = new WebSocket(`ws://${window.location.host}/ws`);
+        let ws = null;
         let tasks = [];
+        let currentTaskId = null;
+        let currentRole = null;
 
-        ws.onmessage = function (event) {
-            const message = JSON.parse(event.data);
-            if (message.type === 'task_created' || message.type === 'task_updated') {
-                const taskIndex = tasks.findIndex(t => t.id === message.task.id);
-                if (taskIndex === -1) {
-                    tasks.push(message.task);
-                } else {
-                    tasks[taskIndex] = message.task;
-                }
-            } else if (message.type === 'task_deleted') {
-                tasks = tasks.filter(t => t.id !== message.task.id);
+        function connectWebSocket(taskId, role) {
+            if (ws) {
+                ws.close();
             }
-            renderTasks();
-        };
+
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+            ws.onopen = function () {
+                // 发送初始化数据
+                ws.send(JSON.stringify({
+                    type: 'init',
+                    task_id: taskId,
+                    role: role
+                }));
+                currentTaskId = taskId;
+                currentRole = role;
+            };
+
+            ws.onmessage = function (event) {
+                const message = JSON.parse(event.data);
+                if (message.type === 'task_created' || message.type === 'task_updated') {
+                    const taskIndex = tasks.findIndex(t => t.id === message.task.id);
+                    if (taskIndex === -1) {
+                        tasks.push(message.task);
+                    } else {
+                        tasks[taskIndex] = message.task;
+                    }
+                } else if (message.type === 'task_deleted') {
+                    tasks = tasks.filter(t => t.id !== message.task.id);
+                }
+                renderTasks();
+            };
+
+            ws.onclose = function () {
+                console.log('WebSocket连接已关闭');
+                currentTaskId = null;
+                currentRole = null;
+            };
+        }
 
         async function createTask() {
             const paramsText = document.getElementById('taskParams').value;
@@ -263,10 +290,17 @@
                     throw new Error('创建任务失败');
                 }
 
+                const newTask = await response.json();
+                // 创建任务后，自动连接为sender
+                connectWebSocket(newTask.id, 'sender');
                 document.getElementById('taskParams').value = '';
             } catch (error) {
                 alert('创建任务失败: ' + error.message);
             }
+        }
+
+        function connectAsReceiver(taskId) {
+            connectWebSocket(taskId, 'receiver');
         }
 
         async function updateTaskStatus(taskId, newStatus) {
@@ -308,6 +342,11 @@
         }
 
         function addTaskLog(taskId) {
+            if (!ws || currentRole !== 'sender') {
+                alert('只有发送者才能添加日志');
+                return;
+            }
+
             const logContent = document.getElementById(`log-input-${taskId}`).value;
             const logLevel = document.getElementById(`log-level-${taskId}`).value;
 
@@ -382,15 +421,17 @@
                     <div class="log-section">
                         <h4>
                             任务日志
-                            <div class="log-form">
-                                <input type="text" id="log-input-${task.id}" class="log-input" placeholder="输入日志内容">
-                                <select id="log-level-${task.id}" class="log-input">
-                                    <option value="info">信息</option>
-                                    <option value="warning">警告</option>
-                                    <option value="error">错误</option>
-                                </select>
-                                <button onclick="addTaskLog('${task.id}')">添加日志</button>
-                            </div>
+                            ${currentTaskId === task.id ? `
+                                <div class="log-form">
+                                    <input type="text" id="log-input-${task.id}" class="log-input" placeholder="输入日志内容">
+                                    <select id="log-level-${task.id}" class="log-input">
+                                        <option value="info">信息</option>
+                                        <option value="warning">警告</option>
+                                        <option value="error">错误</option>
+                                    </select>
+                                    <button onclick="addTaskLog('${task.id}')">添加日志</button>
+                                </div>
+                            ` : ''}
                         </h4>
                         <div class="log-list">
                             ${task.logs.map(log => `
@@ -406,6 +447,9 @@
 
                 const taskActions = document.createElement('div');
                 taskActions.innerHTML = `
+                    ${currentTaskId !== task.id ? `
+                        <button onclick="connectAsReceiver('${task.id}')">监听此任务</button>
+                    ` : ''}
                     <button onclick="updateTaskStatus('${task.id}', '${getNextStatus(task.status)}')">
                         更新状态
                     </button>
