@@ -196,15 +196,17 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close(code=1008, reason="任务不存在")
             return
 
+        log_index = 0
         while True:
-            log_index = 0
             if log_index < len(tasks[task_id].logs):
-                await websocket.send_text(tasks[task_id].logs[log_index].content)
-                log_index += 1
-                if tasks[task_id].logs[log_index].content == "END_SIGNAL":
+                content = tasks[task_id].logs[log_index].content
+                await websocket.send_text(content)
+                logger.debug(f"index: {log_index} 发送消息: {content}")
+                if content == "END_SIGNAL":
                     break
+                log_index += 1
             else:
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket连接断开: {websocket}")

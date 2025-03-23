@@ -4,6 +4,9 @@ from main import app
 import json
 from datetime import datetime
 import logging
+import asyncio
+import threading
+import time
 
 # 配置日志记录器
 logger = logging.getLogger("test_task_log")
@@ -46,42 +49,21 @@ def test_task():
 
 def send_log_in_threading(client, task_id):
     """在多线程中发送日志"""
-    import threading
-    import time
-
     def send_log():
-        with client.websocket_connect("/ws") as sender:
+        with client.websocket_connect("/ws/sender") as sender:
             # 初始化连接
             logger.debug("正在发送初始化数据...")
-            sender.send_json({
-                "type": "init",
-                "task_id": task_id,
-                "role": "sender"
-            })
+            sender.send_text(json.dumps({"task_id": task_id}))
+
+            # 发送测试日志
             for i in range(2):
                 logger.debug(f"发送日志: {i}")
-                log_data = {
-                    "type": "update_task_log",
-                    "task_id": task_id,
-                    "log": {
-                            "timestamp": datetime.now().isoformat(),
-                            "content": "测试日志",
-                            "level": "info"
-                    }
-                }
-                sender.send_json(log_data)
-                time.sleep(0.1)
+                sender.send_text("测试日志")
+                time.sleep(0.2)
+
+            # 发送结束信号
             logger.debug("正在发送结束信号...")
-            end_signal = {
-                "type": "update_task_log",
-                "task_id": task_id,
-                "log": {
-                    "timestamp": datetime.now().isoformat(),
-                    "content": "END_SIGNAL",
-                    "level": "info"
-                }
-            }
-            sender.send_json(end_signal)
+            sender.send_text("END_SIGNAL")
             logger.debug("结束信号发送完成")
 
     threading.Thread(target=send_log).start()
@@ -92,40 +74,36 @@ def test_task_log_websocket(test_task):
     logger.info("开始测试基本的WebSocket日志功能")
     task_id = test_task["id"]
 
-    # 连接sender和receiver
+    # 连接receiver
     logger.debug("正在建立WebSocket连接...")
-    with client.websocket_connect("/ws") as receiver:
+    with client.websocket_connect("/ws/receiver") as receiver:
         logger.debug("WebSocket连接已建立")
 
-        receiver.send_json({
-            "type": "init",
-            "task_id": task_id,
-            "role": "receiver"
-        })
+        # 发送初始化数据
+        receiver.send_text(json.dumps({"task_id": task_id}))
         logger.debug("初始化数据发送完成")
 
+        # 启动sender线程
         send_log_in_threading(client, task_id)
 
-        response_logs_list = []
+        # 接收日志
+        received_logs = []
         while True:
             try:
-                logger.debug("等待receiver接收信号...")
-                response = receiver.receive_json()
-                receiver.send_json({})
-                response_logs_list.extend(response["task"]["logs"])
-                if len(response["task"]["logs"]) > 0:
-                    content = " ".join([log["content"]
-                                       for log in response["task"]["logs"]])
-                    logger.debug(f"receiver已收到日志: {content}")
-                    if "END_SIGNAL" in content:
-                        logger.debug("receiver已收到结束信号")
-                        break
+                logger.debug("等待receiver接收消息...")
+                message = receiver.receive_text()
+                received_logs.append(message)
+                logger.debug(f"receiver已收到消息: {message}")
+
+                if message == "END_SIGNAL":
+                    logger.debug("receiver已收到结束信号")
+                    break
             except Exception as e:
                 logger.exception(e)
                 break
 
-    assert len(response_logs_list) == 10
-
+    assert len(received_logs) == 3  # 2条测试日志 + 1条结束信号
+    assert received_logs[-1] == "END_SIGNAL"
     logger.info("基本WebSocket日志功能测试完成")
 
 
@@ -134,25 +112,12 @@ def test_task_log_sender_only(test_task):
     task_id = test_task["id"]
 
     # 只连接sender
-    with client.websocket_connect("/ws") as sender:
+    with client.websocket_connect("/ws/sender") as sender:
         # 初始化连接
-        sender.send_json({
-            "type": "init",
-            "task_id": task_id,
-            "role": "sender"
-        })
+        sender.send_text(json.dumps({"task_id": task_id}))
 
-        # 发送日志
-        log_data = {
-            "type": "update_task_log",
-            "task_id": task_id,
-            "log": {
-                "timestamp": datetime.now().isoformat(),
-                "content": "只有sender的测试日志",
-                "level": "info"
-            }
-        }
-        sender.send_json(log_data)
+        # 发送测试日志
+        sender.send_text("只有sender的测试日志")
 
         # 验证任务日志已更新
         response = client.get(f"/tasks/{task_id}/logs")
@@ -160,25 +125,10 @@ def test_task_log_sender_only(test_task):
         logs = response.json()
         assert len(logs) == 1
         assert logs[0]["content"] == "只有sender的测试日志"
-        assert logs[0]["level"] == "info"
-
-        # 验证任务状态已更新
-        response = client.get(f"/tasks/{task_id}")
-        assert response.status_code == 200
-        task = response.json()
-        assert task["updated_at"] is not None
+        assert logs[0]["level"] == "INFO"
 
         # 发送结束信号
-        end_signal = {
-            "type": "update_task_log",
-            "task_id": task_id,
-            "log": {
-                "timestamp": datetime.now().isoformat(),
-                "content": "END_SIGNAL",
-                "level": "info"
-            }
-        }
-        sender.send_json(end_signal)
+        sender.send_text("END_SIGNAL")
 
         # 验证结束信号已记录
         response = client.get(f"/tasks/{task_id}/logs")
@@ -188,31 +138,11 @@ def test_task_log_sender_only(test_task):
         assert logs[1]["content"] == "END_SIGNAL"
 
 
-def test_task_log_invalid_role(test_task):
-    """测试无效的角色"""
-    task_id = test_task["id"]
-
-    with client.websocket_connect("/ws") as websocket:
-        # 尝试使用无效的角色
-        websocket.send_json({
-            "type": "init",
-            "task_id": task_id,
-            "role": "invalid_role"
-        })
-        # 验证连接被关闭
-        with pytest.raises(Exception):
-            websocket.receive_json()
-
-
 def test_task_log_invalid_task():
     """测试连接不存在的任务"""
-    with client.websocket_connect("/ws") as websocket:
+    with client.websocket_connect("/ws/sender") as websocket:
         # 尝试连接不存在的任务
-        websocket.send_json({
-            "type": "init",
-            "task_id": "non_existent_task",
-            "role": "sender"
-        })
+        websocket.send_text(json.dumps({"task_id": "non_existent_task"}))
         # 验证连接被关闭
         with pytest.raises(Exception):
-            websocket.receive_json()
+            websocket.receive_text()

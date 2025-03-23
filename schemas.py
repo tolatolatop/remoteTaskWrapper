@@ -14,7 +14,7 @@ class TaskStatus(str, Enum):
 
 class TaskLog(BaseModel):
     """任务日志模型"""
-    timestamp: datetime = Field(..., description="日志时间戳")
+    timestamp: str = Field(..., description="日志时间戳")
     content: str = Field(..., description="日志内容")
     level: str = Field(default="info", description="日志级别")
 
