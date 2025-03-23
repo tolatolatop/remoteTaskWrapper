@@ -3,6 +3,23 @@ from fastapi.testclient import TestClient
 from main import app
 import json
 from datetime import datetime
+import logging
+
+# 配置日志记录器
+logger = logging.getLogger("test_task_log")
+logger.setLevel(logging.DEBUG)
+
+# 创建控制台处理器
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)
+
+# 创建格式化器
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+
+# 添加处理器到logger
+logger.addHandler(console_handler)
 
 client = TestClient(app)
 
@@ -17,21 +34,28 @@ TEST_PARAMS = {
 @pytest.fixture
 def test_task():
     """创建测试任务"""
+    logger.info("开始创建测试任务")
     task_data = {
         "params": {"test": "data"},
         "status": "pending"
     }
     response = client.post("/tasks", data={"params": json.dumps(task_data)})
+    logger.info(f"测试任务创建完成，ID: {response.json()['id']}")
     return response.json()
 
 
 def test_task_log_websocket(test_task):
     """测试基本的日志功能"""
+    logger.info("开始测试基本的WebSocket日志功能")
     task_id = test_task["id"]
 
     # 连接sender和receiver
+    logger.debug("正在建立WebSocket连接...")
     with client.websocket_connect("/ws") as sender, client.websocket_connect("/ws") as receiver:
+        logger.debug("WebSocket连接已建立")
+
         # 初始化连接
+        logger.debug("正在发送初始化数据...")
         sender.send_json({
             "type": "init",
             "task_id": task_id,
@@ -42,8 +66,10 @@ def test_task_log_websocket(test_task):
             "task_id": task_id,
             "role": "receiver"
         })
+        logger.debug("初始化数据发送完成")
 
         # 发送日志
+        logger.debug("正在发送测试日志...")
         log_data = {
             "type": "update_task_log",
             "task_id": task_id,
@@ -54,15 +80,20 @@ def test_task_log_websocket(test_task):
             }
         }
         sender.send_json(log_data)
+        logger.debug("测试日志发送完成")
 
         # 验证receiver收到更新
+        logger.debug("等待receiver接收更新...")
         response = receiver.receive_json()
+        logger.debug("receiver已收到更新")
         assert response["type"] == "task_updated"
         assert response["task"]["id"] == task_id
         assert len(response["task"]["logs"]) == 1
         assert response["task"]["logs"][0]["content"] == "测试日志"
+        logger.debug("更新验证通过")
 
         # 发送结束信号
+        logger.debug("正在发送结束信号...")
         end_signal = {
             "type": "update_task_log",
             "task_id": task_id,
@@ -73,13 +104,19 @@ def test_task_log_websocket(test_task):
             }
         }
         sender.send_json(end_signal)
+        logger.debug("结束信号发送完成")
 
         # 验证receiver收到结束信号
+        logger.debug("等待receiver接收结束信号...")
         response = receiver.receive_json()
+        logger.debug("receiver已收到结束信号")
         assert response["type"] == "task_updated"
         assert response["task"]["id"] == task_id
         assert len(response["task"]["logs"]) == 2
         assert response["task"]["logs"][1]["content"] == "END_SIGNAL"
+        logger.debug("结束信号验证通过")
+
+    logger.info("基本WebSocket日志功能测试完成")
 
 
 def test_task_log_multiple_receivers(test_task):
