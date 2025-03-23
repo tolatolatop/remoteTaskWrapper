@@ -1,0 +1,12 @@
+{
+    "name": "测试任务",
+    "description": "这是一个用于测试的任务",
+    "priority": "high",
+    "type": "data_processing",
+    "parameters": {
+        "input_format": "csv",
+        "output_format": "json",
+        "batch_size": 1000,
+        "timeout": 3600
+    }
+}
