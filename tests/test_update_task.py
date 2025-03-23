@@ -30,7 +30,7 @@ def test_update_task_status(test_task):
 
     # 更新任务状态为进行中
     update_data = {
-        "status": "in_progress"
+        "status": "running"
     }
     response = client.put(
         f"/tasks/{task_id}",
@@ -39,7 +39,7 @@ def test_update_task_status(test_task):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "in_progress"
+    assert data["status"] == "running"
     assert data["params"] == TEST_PARAMS
     assert "updated_at" in data
     assert data["updated_at"] != test_task["updated_at"]
@@ -74,7 +74,7 @@ def test_update_task_params(test_task):
 def test_update_task_not_found():
     """测试更新不存在的任务"""
     update_data = {
-        "status": "in_progress"
+        "status": "running"
     }
     response = client.put(
         "/tasks/999",
@@ -82,7 +82,7 @@ def test_update_task_not_found():
     )
 
     assert response.status_code == 404
-    assert "任务不存在" in response.json()["detail"]
+    assert response.json()["detail"] == "任务不存在"
 
 
 def test_update_task_invalid_status(test_task):
@@ -107,7 +107,7 @@ def test_update_task_multiple_fields(test_task):
 
     # 同时更新状态和参数
     update_data = {
-        "status": "in_progress",
+        "status": "running",
         "params": {
             "name": "多字段更新测试",
             "description": "这是多字段更新的描述"
@@ -118,9 +118,9 @@ def test_update_task_multiple_fields(test_task):
         json=update_data
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, f"更新任务失败 {response.json()}"
     data = response.json()
-    assert data["status"] == "in_progress"
+    assert data["status"] == "running"
     assert data["params"]["name"] == "多字段更新测试"
     assert data["params"]["description"] == "这是多字段更新的描述"
     assert "updated_at" in data
