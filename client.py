@@ -164,13 +164,6 @@ async def sender_websocket(task_id):
                     click.echo(f"读取输入时发生错误: {str(e)}", err=True)
                     break
 
-            # 发送结束信号
-            try:
-                await websocket.send("END_SIGNAL")
-                click.echo("已发送结束信号")
-            except Exception as e:
-                click.echo(f"发送结束信号失败: {str(e)}", err=True)
-
     except websockets.exceptions.ConnectionClosed:
         click.echo("WebSocket连接已关闭", err=True)
         sys.exit(1)
