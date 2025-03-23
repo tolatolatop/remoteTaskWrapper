@@ -216,15 +216,6 @@ async def websocket_endpoint(websocket: WebSocket):
                             "task": manager._serialize_datetime(task.model_dump())
                         })
                         logger.debug("广播完成")
-
-                        # 检查是否是结束信号
-                        if log_data.get("content") == "END_SIGNAL":
-                            logger.info(f"收到结束信号，关闭所有连接: task_id={task_id}")
-                            # 关闭该任务的所有连接
-                            for role_type in ["sender", "receiver"]:
-                                for conn in manager.task_connections[task_id][role_type]:
-                                    await conn.close(code=1000, reason="收到结束信号")
-                            return
                     else:
                         logger.warning(f"尝试更新不存在的任务日志: task_id={task_id}")
             else:  # receiver
