@@ -156,7 +156,7 @@ async def sender_websocket(task_id):
                     if not line:
                         click.echo("输入流已关闭")
                         break
-                    await websocket.send(line.strip())
+                    await websocket.send(line)
                 except KeyboardInterrupt:
                     click.echo("\n检测到键盘中断，正在关闭连接...")
                     break
