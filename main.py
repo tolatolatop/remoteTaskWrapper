@@ -33,43 +33,20 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             message = json.loads(data)
 
-            if message["type"] == "create_task":
-                task_data = message["task"]
-                task = Task(
-                    id=task_data["id"],
-                    params=task_data["params"],
-                    status=TaskStatus.PENDING,
-                    created_at=datetime.now(),
-                    updated_at=datetime.now()
-                )
-                tasks[task.id] = task
-                await broadcast_task_update("task_created", task)
-
-            elif message["type"] == "update_task":
+            if message["type"] == "update_task_log":
                 task_id = message["task_id"]
                 if task_id in tasks:
                     task = tasks[task_id]
-                    if "status" in message:
-                        task.status = TaskStatus(message["status"])
-                    if "result" in message:
-                        task.result = message["result"]
-                    if "log" in message:
-                        log_data = message["log"]
-                        log = TaskLog(
-                            timestamp=datetime.fromisoformat(
-                                log_data["timestamp"]),
-                            content=log_data["content"],
-                            level=log_data.get("level", "info")
-                        )
-                        task.logs.append(log)
+                    log_data = message["log"]
+                    log = TaskLog(
+                        timestamp=datetime.fromisoformat(
+                            log_data["timestamp"]),
+                        content=log_data["content"],
+                        level=log_data.get("level", "info")
+                    )
+                    task.logs.append(log)
                     task.updated_at = datetime.now()
                     await broadcast_task_update("task_updated", task)
-
-            elif message["type"] == "delete_task":
-                task_id = message["task_id"]
-                if task_id in tasks:
-                    task = tasks.pop(task_id)
-                    await broadcast_task_update("task_deleted", task)
 
     except WebSocketDisconnect:
         active_connections.remove(websocket)
@@ -101,6 +78,7 @@ async def create_task(task: TaskCreate):
         updated_at=datetime.now()
     )
     tasks[task_id] = new_task
+    await broadcast_task_update("task_created", new_task)
     return new_task
 
 
@@ -123,6 +101,7 @@ async def update_task(task_id: str, task_update: TaskUpdate):
         setattr(task, field, value)
 
     task.updated_at = datetime.now()
+    await broadcast_task_update("task_updated", task)
     return task
 
 
@@ -136,6 +115,7 @@ async def submit_task_result(task_id: str, result: dict):
     task.status = TaskStatus.COMPLETED
     task.updated_at = datetime.now()
 
+    await broadcast_task_update("task_updated", task)
     return {"message": "任务结果已提交", "task": task.dict()}
 
 
@@ -160,6 +140,7 @@ async def add_task_log(task_id: str, log: TaskLog):
     task.logs.append(log)
     task.updated_at = datetime.now()
 
+    await broadcast_task_update("task_updated", task)
     return {"message": "日志已添加", "task": task.dict()}
 
 
@@ -178,6 +159,7 @@ async def delete_task(task_id: str):
         raise HTTPException(status_code=404, detail="任务不存在")
 
     task = tasks.pop(task_id)
+    await broadcast_task_update("task_deleted", task)
     return {"message": "任务已删除", "task": task.dict()}
 
 
