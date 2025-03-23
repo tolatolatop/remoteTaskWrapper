@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务管理器</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .task-form {
+            margin-bottom: 20px;
+            padding: 20px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+
+        .task-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .task-item {
+            padding: 15px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .task-item.completed {
+            background-color: #e8f5e9;
+        }
+
+        .task-item.pending {
+            background-color: #fff3e0;
+        }
+
+        button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            padding: 8px;
+            margin: 8px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>任务管理器</h1>
+
+    <div class="task-form">
+        <h2>创建新任务</h2>
+        <input type="text" id="taskTitle" placeholder="任务标题">
+        <textarea id="taskDescription" placeholder="任务描述"></textarea>
+        <button onclick="createTask()">创建任务</button>
+    </div>
+
+    <div class="task-list" id="taskList">
+        <!-- 任务列表将在这里动态显示 -->
+    </div>
+
+    <script>
+        let ws = new WebSocket(`ws://${window.location.host}/ws`);
+        let tasks = [];
+
+        ws.onmessage = function (event) {
+            const message = JSON.parse(event.data);
+            if (message.type === 'task_created' || message.type === 'task_updated') {
+                const taskIndex = tasks.findIndex(t => t.id === message.task.id);
+                if (taskIndex === -1) {
+                    tasks.push(message.task);
+                } else {
+                    tasks[taskIndex] = message.task;
+                }
+            } else if (message.type === 'task_deleted') {
+                tasks = tasks.filter(t => t.id !== message.task.id);
+            }
+            renderTasks();
+        };
+
+        function createTask() {
+            const title = document.getElementById('taskTitle').value;
+            const description = document.getElementById('taskDescription').value;
+
+            if (!title || !description) {
+                alert('请填写任务标题和描述');
+                return;
+            }
+
+            const task = {
+                id: Date.now().toString(),
+                title: title,
+                description: description
+            };
+
+            ws.send(JSON.stringify({
+                type: 'create_task',
+                task: task
+            }));
+
+            document.getElementById('taskTitle').value = '';
+            document.getElementById('taskDescription').value = '';
+        }
+
+        function updateTaskStatus(taskId, newStatus) {
+            ws.send(JSON.stringify({
+                type: 'update_task',
+                task_id: taskId,
+                status: newStatus
+            }));
+        }
+
+        function deleteTask(taskId) {
+            ws.send(JSON.stringify({
+                type: 'delete_task',
+                task_id: taskId
+            }));
+        }
+
+        function renderTasks() {
+            const taskList = document.getElementById('taskList');
+            taskList.innerHTML = '';
+
+            tasks.forEach(task => {
+                const taskElement = document.createElement('div');
+                taskElement.className = `task-item ${task.status}`;
+
+                const taskContent = document.createElement('div');
+                taskContent.innerHTML = `
+                    <h3>${task.title}</h3>
+                    <p>${task.description}</p>
+                    <p>状态: ${task.status}</p>
+                    <p>创建时间: ${new Date(task.created_at).toLocaleString()}</p>
+                `;
+
+                const taskActions = document.createElement('div');
+                taskActions.innerHTML = `
+                    <button onclick="updateTaskStatus('${task.id}', '${task.status === 'completed' ? 'pending' : 'completed'}')">
+                        ${task.status === 'completed' ? '标记为待完成' : '标记为已完成'}
+                    </button>
+                    <button onclick="deleteTask('${task.id}')">删除</button>
+                `;
+
+                taskElement.appendChild(taskContent);
+                taskElement.appendChild(taskActions);
+                taskList.appendChild(taskElement);
+            });
+        }
+
+        // 页面加载时获取现有任务
+        fetch('/tasks')
+            .then(response => response.json())
+            .then(data => {
+                tasks = data;
+                renderTasks();
+            });
+    </script>
+</body>
+
+</html>
