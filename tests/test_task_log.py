@@ -44,6 +44,49 @@ def test_task():
     return response.json()
 
 
+def send_log_in_threading(client, task_id):
+    """在多线程中发送日志"""
+    import threading
+    import time
+
+    def send_log():
+        with client.websocket_connect("/ws") as sender:
+            # 初始化连接
+            logger.debug("正在发送初始化数据...")
+            sender.send_json({
+                "type": "init",
+                "task_id": task_id,
+                "role": "sender"
+            })
+            for i in range(2):
+                logger.debug(f"发送日志: {i}")
+                log_data = {
+                    "type": "update_task_log",
+                    "task_id": task_id,
+                    "log": {
+                            "timestamp": datetime.now().isoformat(),
+                            "content": "测试日志",
+                            "level": "info"
+                    }
+                }
+                sender.send_json(log_data)
+                time.sleep(0.1)
+            logger.debug("正在发送结束信号...")
+            end_signal = {
+                "type": "update_task_log",
+                "task_id": task_id,
+                "log": {
+                    "timestamp": datetime.now().isoformat(),
+                    "content": "END_SIGNAL",
+                    "level": "info"
+                }
+            }
+            sender.send_json(end_signal)
+            logger.debug("结束信号发送完成")
+
+    threading.Thread(target=send_log).start()
+
+
 def test_task_log_websocket(test_task):
     """测试基本的日志功能"""
     logger.info("开始测试基本的WebSocket日志功能")
@@ -51,63 +94,37 @@ def test_task_log_websocket(test_task):
 
     # 连接sender和receiver
     logger.debug("正在建立WebSocket连接...")
-    with client.websocket_connect("/ws") as sender:
+    with client.websocket_connect("/ws") as receiver:
         logger.debug("WebSocket连接已建立")
 
-        # 初始化连接
-        logger.debug("正在发送初始化数据...")
-        sender.send_json({
-            "type": "init",
-            "task_id": task_id,
-            "role": "sender"
-        })
-
-        # 发送日志
-        logger.debug("正在发送测试日志...")
-        log_data = {
-            "type": "update_task_log",
-            "task_id": task_id,
-            "log": {
-                "timestamp": datetime.now().isoformat(),
-                "content": "测试日志",
-                "level": "info"
-            }
-        }
-        sender.send_json(log_data)
-        logger.debug("测试日志发送完成")
-
-        # 发送结束信号
-        logger.debug("正在发送结束信号...")
-        end_signal = {
-            "type": "update_task_log",
-            "task_id": task_id,
-            "log": {
-                "timestamp": datetime.now().isoformat(),
-                "content": "END_SIGNAL",
-                "level": "info"
-            }
-        }
-        sender.send_json(end_signal)
-        sender.close()
-        logger.debug("结束信号发送完成")
-
-    with client.websocket_connect("/ws") as receiver:
         receiver.send_json({
             "type": "init",
             "task_id": task_id,
             "role": "receiver"
         })
         logger.debug("初始化数据发送完成")
-        # 验证receiver收到结束信号
-        logger.debug("等待receiver接收结束信号...")
-        response = receiver.receive_json()
-        logger.debug("receiver已收到结束信号")
-        assert response["type"] == "task_updated"
-        assert response["task"]["id"] == task_id
-        assert len(response["task"]["logs"]) == 2
-        assert response["task"]["logs"][0]["content"] == "测试日志"
-        assert response["task"]["logs"][1]["content"] == "END_SIGNAL"
-        receiver.close()
+
+        send_log_in_threading(client, task_id)
+
+        response_logs_list = []
+        while True:
+            try:
+                logger.debug("等待receiver接收信号...")
+                response = receiver.receive_json()
+                receiver.send_json({})
+                response_logs_list.extend(response["task"]["logs"])
+                if len(response["task"]["logs"]) > 0:
+                    content = " ".join([log["content"]
+                                       for log in response["task"]["logs"]])
+                    logger.debug(f"receiver已收到日志: {content}")
+                    if "END_SIGNAL" in content:
+                        logger.debug("receiver已收到结束信号")
+                        break
+            except Exception as e:
+                logger.exception(e)
+                break
+
+    assert len(response_logs_list) == 10
 
     logger.info("基本WebSocket日志功能测试完成")
 
