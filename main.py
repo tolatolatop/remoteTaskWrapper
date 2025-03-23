@@ -158,7 +158,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         # 广播给该任务的所有接收者
                         await manager.broadcast_to_task(task_id, {
                             "type": "task_updated",
-                            "task": task.dict()
+                            "task": task.model_dump()
                         })
             else:  # receiver
                 # 接收者不需要处理消息
@@ -219,7 +219,7 @@ async def create_task(
 
         await manager.broadcast_to_task(task_id, {
             "type": "task_created",
-            "task": new_task.dict()
+            "task": new_task.model_dump()
         })
         return new_task
     except json.JSONDecodeError:
@@ -244,7 +244,7 @@ async def update_task(task_id: str, task_update: TaskUpdate):
         raise HTTPException(status_code=404, detail="任务不存在")
 
     task = tasks[task_id]
-    update_data = task_update.dict(exclude_unset=True)
+    update_data = task_update.model_dump(exclude_unset=True)
     logger.debug(f"更新任务 {task_id}: {update_data}")
 
     # 更新任务字段
@@ -260,7 +260,7 @@ async def update_task(task_id: str, task_update: TaskUpdate):
 
     await manager.broadcast_to_task(task_id, {
         "type": "task_updated",
-        "task": task.dict()
+        "task": task.model_dump()
     })
     return task
 
@@ -306,9 +306,9 @@ async def submit_task_result(
 
         await manager.broadcast_to_task(task_id, {
             "type": "task_updated",
-            "task": task.dict()
+            "task": task.model_dump()
         })
-        return {"message": "任务结果已提交", "task": task.dict()}
+        return {"message": "任务结果已提交", "task": task.model_dump()}
     except json.JSONDecodeError:
         logger.error(f"提交任务结果失败: 无效的结果参数格式")
         raise HTTPException(status_code=400, detail="无效的结果参数格式")
@@ -365,9 +365,9 @@ async def add_task_log(task_id: str, log: TaskLog):
 
     await manager.broadcast_to_task(task_id, {
         "type": "task_updated",
-        "task": task.dict()
+        "task": task.model_dump()
     })
-    return {"message": "日志已添加", "task": task.dict()}
+    return {"message": "日志已添加", "task": task.model_dump()}
 
 
 @app.get("/tasks/{task_id}/logs")
@@ -387,9 +387,9 @@ async def delete_task(task_id: str):
     task = tasks.pop(task_id)
     await manager.broadcast_to_task(task_id, {
         "type": "task_deleted",
-        "task": task.dict()
+        "task": task.model_dump()
     })
-    return {"message": "任务已删除", "task": task.dict()}
+    return {"message": "任务已删除", "task": task.model_dump()}
 
 
 @app.get("/tasks/{task_id}/params")
