@@ -244,16 +244,19 @@ async def update_task(task_id: str, task_update: TaskUpdate):
         raise HTTPException(status_code=404, detail="任务不存在")
 
     task = tasks[task_id]
-    update_data = task_update.model_dump(exclude_unset=True)
+    update_data = task_update.model_dump()
     logger.debug(f"更新任务 {task_id}: {update_data}")
 
     # 更新任务字段
     for field, value in update_data.items():
-        if field == "params":
-            # 对于params字段，直接更新整个字典
-            task.params = value
-        else:
-            setattr(task, field, value)
+        if value is not None:  # 只更新非None的字段
+            if field == "params":
+                # 对于params字段，直接更新整个字典
+                task.params = value
+                logger.debug(f"更新任务参数: {value}")
+            else:
+                setattr(task, field, value)
+                logger.debug(f"更新任务字段 {field}: {value}")
 
     task.updated_at = datetime.now()
     logger.info(f"任务更新成功: {task_id}")

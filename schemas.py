@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Dict
 from enum import Enum
 
 
@@ -29,9 +29,30 @@ class TaskCreate(TaskBase):
 
 
 class TaskUpdate(BaseModel):
-    status: Optional[TaskStatus] = Field(None, description="任务状态")
-    result: Optional[dict] = Field(None, description="任务结果")
-    log: Optional[TaskLog] = Field(None, description="任务日志")
+    """任务更新模型"""
+    status: Optional[TaskStatus] = None
+    result: Optional[Dict] = None
+    logs: Optional[List[TaskLog]] = None
+    params: Optional[Dict] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "running",
+                "result": {"output": "处理完成"},
+                "logs": [
+                    {
+                        "timestamp": "2024-03-23T10:00:00",
+                        "content": "开始处理任务",
+                        "level": "info"
+                    }
+                ],
+                "params": {
+                    "name": "更新后的任务",
+                    "description": "这是更新后的描述"
+                }
+            }
+        }
 
 
 class Task(TaskBase):
