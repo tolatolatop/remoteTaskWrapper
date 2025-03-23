@@ -72,7 +72,6 @@ class ConnectionManager:
         self.connection_info: Dict[WebSocket, Dict[str, str]] = {}
 
     async def connect(self, websocket: WebSocket, task_id: str, role: str):
-        await websocket.accept()
         if task_id not in self.task_connections:
             self.task_connections[task_id] = {
                 "sender": set(), "receiver": set()}
@@ -93,10 +92,25 @@ class ConnectionManager:
 
             del self.connection_info[websocket]
 
+    def _serialize_datetime(self, obj):
+        """递归处理datetime对象的序列化"""
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, dict):
+            return {k: self._serialize_datetime(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._serialize_datetime(item) for item in obj]
+        return obj
+
     async def broadcast_to_task(self, task_id: str, message: dict):
         if task_id in self.task_connections:
+            # 序列化消息中的所有datetime对象
+            serialized_message = {
+                "type": message["type"],
+                "task": self._serialize_datetime(message["task"])
+            }
             for receiver in self.task_connections[task_id]["receiver"]:
-                await receiver.send_text(json.dumps(message))
+                await receiver.send_text(json.dumps(serialized_message))
 
 
 manager = ConnectionManager()
@@ -181,6 +195,15 @@ async def websocket_endpoint(websocket: WebSocket):
                             "task": task.model_dump()
                         })
                         logger.debug("广播完成")
+
+                        # 检查是否是结束信号
+                        if log_data.get("content") == "END_SIGNAL":
+                            logger.info(f"收到结束信号，关闭所有连接: task_id={task_id}")
+                            # 关闭该任务的所有连接
+                            for role_type in ["sender", "receiver"]:
+                                for conn in manager.task_connections[task_id][role_type]:
+                                    await conn.close(code=1000, reason="收到结束信号")
+                            return
                     else:
                         logger.warning(f"尝试更新不存在的任务日志: task_id={task_id}")
             else:  # receiver
