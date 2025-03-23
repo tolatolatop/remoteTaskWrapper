@@ -113,6 +113,9 @@ async def read_root():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     try:
+        # 先接受WebSocket连接
+        await websocket.accept()
+
         # 等待客户端发送初始化数据
         data = await websocket.receive_text()
         init_data = json.loads(data)
